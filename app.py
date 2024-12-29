@@ -5,12 +5,15 @@ import tempfile
 import logging
 from datetime import timedelta
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Create a temporary directory for downloads
 TEMP_DIR = tempfile.mkdtemp()
+# Create a thread pool for concurrent downloads
+executor = ThreadPoolExecutor(max_workers=4)
 
 def format_duration(seconds):
     if not seconds:
@@ -18,9 +21,7 @@ def format_duration(seconds):
     return str(timedelta(seconds=seconds))
 
 def clean_filename(title):
-    # Remove invalid filename characters
     cleaned = re.sub(r'[<>:"/\\|?*]', '', title)
-    # Limit length and remove trailing spaces
     return cleaned[:100].strip()
 
 @app.route('/')
@@ -38,7 +39,6 @@ def get_info():
         if not url:
             return jsonify({'error': 'No URL provided'}), 400
 
-        # Configure yt-dlp options for info extraction
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -49,11 +49,16 @@ def get_info():
             try:
                 info = ydl.extract_info(url, download=False)
                 
-                # Extract and format video information
+                # Enhanced video information
                 video_info = {
                     'title': info.get('title', 'Unknown Title'),
                     'duration': format_duration(info.get('duration')),
                     'thumbnail': info.get('thumbnail', ''),
+                    'formats': [
+                        {'ext': 'mp4', 'label': 'Video (MP4)'},
+                        {'ext': 'mp3', 'label': 'Audio (MP3)'},
+                        {'ext': 'm4a', 'label': 'Audio (M4A)'}
+                    ]
                 }
                 
                 return jsonify(video_info)
@@ -72,40 +77,77 @@ def download_video():
         data = request.get_json()
         url = data.get('url')
         quality = data.get('quality', 'highest')
+        format_type = data.get('format', 'mp4')
         
         if not url:
             return jsonify({'error': 'No URL provided'}), 400
 
-        # Map quality selection to yt-dlp format
+        # Enhanced format selection with audio support
         format_selection = {
-            'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
-            '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
-            '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
-        }.get(quality, 'best[ext=mp4]')
+            'mp4': {
+                'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+                '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
+                '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
+            },
+            'mp3': {
+                'highest': 'bestaudio[ext=mp3]/bestaudio/best',
+                '128k': 'bestaudio[abr<=128]/best[abr<=128]/best',
+                '96k': 'bestaudio[abr<=96]/best[abr<=96]/best',
+                '64k': 'bestaudio[abr<=64]/best[abr<=64]/best'
+            },
+            'm4a': {
+                'highest': 'bestaudio[ext=m4a]/bestaudio/best',
+                '128k': 'bestaudio[abr<=128][ext=m4a]/best[abr<=128]/best',
+                '96k': 'bestaudio[abr<=96][ext=m4a]/best[abr<=96]/best',
+                '64k': 'bestaudio[abr<=64][ext=m4a]/best[abr<=64]/best'
+            }
+        }
 
-        # Configure download options
+        # Configure optimized download options
         ydl_opts = {
-            'format': format_selection,
+            'format': format_selection[format_type][quality],
             'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
-            'merge_output_format': 'mp4',
             'restrictfilenames': True,
             'noplaylist': True,
             'quiet': True,
-            'no_warnings': True
+            'no_warnings': True,
+            'postprocessors': [],
+            'concurrent_fragment_downloads': 10,  # Enable parallel fragment downloads
+            'buffersize': 1024 * 1024,  # Increase buffer size to 1MB
         }
+
+        # Add format-specific options
+        if format_type == 'mp3':
+            ydl_opts['postprocessors'].append({
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': quality.replace('k', ''),
+            })
+            ydl_opts['format'] = 'bestaudio/best'
+        elif format_type == 'm4a':
+            ydl_opts['postprocessors'].append({
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+                'preferredquality': quality.replace('k', ''),
+            })
+            ydl_opts['format'] = 'bestaudio/best'
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Extract info first to get the filename
             info = ydl.extract_info(url, download=False)
             title = clean_filename(info.get('title', 'video'))
             
-            # Download the video
-            info = ydl.extract_info(url, download=True)
+            # Download the video/audio using thread pool
+            info = executor.submit(ydl.extract_info, url, download=True).result()
             filename = ydl.prepare_filename(info)
             
+            # Handle different output extensions
+            if format_type in ['mp3', 'm4a']:
+                base_path = os.path.splitext(filename)[0]
+                filename = f"{base_path}.{format_type}"
+
             if not os.path.exists(filename):
-                # If the file doesn't exist with .mp4 extension, try to find it
                 base_path = os.path.splitext(filename)[0]
                 potential_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(os.path.basename(base_path))]
                 if potential_files:
@@ -118,11 +160,10 @@ def download_video():
                 return send_file(
                     filename,
                     as_attachment=True,
-                    download_name=f"{title}.mp4",
-                    mimetype='video/mp4'
+                    download_name=f"{title}.{format_type}",
+                    mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
                 )
             finally:
-                # Clean up the file after sending
                 try:
                     os.remove(filename)
                 except:
@@ -133,7 +174,6 @@ def download_video():
         return jsonify({'error': str(e)}), 500
 
 def cleanup_old_files():
-    """Clean up old files in the temp directory"""
     try:
         for filename in os.listdir(TEMP_DIR):
             filepath = os.path.join(TEMP_DIR, filename)

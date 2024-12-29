@@ -247,103 +247,158 @@
         </div>
     </div>
 
-    <script>
-        const urlInput = document.getElementById('url-input');
-        const fetchBtn = document.getElementById('fetch-btn');
-        const downloadBtn = document.getElementById('download-btn');
-        const errorMessage = document.getElementById('error-message');
-        const videoInfo = document.getElementById('video-info');
-        const videoThumbnail = document.getElementById('video-thumbnail');
-        const videoTitle = document.getElementById('video-title');
-        const videoDuration = document.getElementById('video-duration');
-        const qualitySelect = document.getElementById('quality-select');
-        const progressBar = document.getElementById('progress-bar');
-        const progress = document.getElementById('progress');
+<script>
+    const urlInput = document.getElementById('url-input');
+    const fetchBtn = document.getElementById('fetch-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const errorMessage = document.getElementById('error-message');
+    const videoInfo = document.getElementById('video-info');
+    const videoThumbnail = document.getElementById('video-thumbnail');
+    const videoTitle = document.getElementById('video-title');
+    const videoDuration = document.getElementById('video-duration');
+    const qualitySelect = document.getElementById('quality-select');
+    const formatSelect = document.createElement('select');  // New format select element
+    const progressBar = document.getElementById('progress-bar');
+    const progress = document.getElementById('progress');
 
-        function showError(message) {
-            errorMessage.style.display = 'flex';
-            errorMessage.querySelector('span').textContent = message;
+    // Add format select to the UI
+    formatSelect.className = 'quality-select';
+    formatSelect.id = 'format-select';
+    qualitySelect.parentNode.insertBefore(formatSelect, qualitySelect);
+
+    // Update quality options based on format
+    function updateQualityOptions(format) {
+        qualitySelect.innerHTML = '';
+        
+        if (format === 'mp4') {
+            const videoQualities = [
+                { value: 'highest', label: 'Highest Quality' },
+                { value: '720p', label: '720p' },
+                { value: '480p', label: '480p' },
+                { value: '360p', label: '360p' }
+            ];
+            
+            videoQualities.forEach(quality => {
+                const option = document.createElement('option');
+                option.value = quality.value;
+                option.textContent = quality.label;
+                qualitySelect.appendChild(option);
+            });
+        } else {
+            const audioQualities = [
+                { value: 'highest', label: 'Highest Quality' },
+                { value: '128k', label: '128 kbps' },
+                { value: '96k', label: '96 kbps' },
+                { value: '64k', label: '64 kbps' }
+            ];
+            
+            audioQualities.forEach(quality => {
+                const option = document.createElement('option');
+                option.value = quality.value;
+                option.textContent = quality.label;
+                qualitySelect.appendChild(option);
+            });
         }
+    }
 
-        function hideError() {
-            errorMessage.style.display = 'none';
-        }
+    function showError(message) {
+        errorMessage.style.display = 'flex';
+        errorMessage.querySelector('span').textContent = message;
+    }
 
-        function setLoading(button, isLoading) {
-            const spinner = button.querySelector('.spinner');
-            button.disabled = isLoading;
-            spinner.style.display = isLoading ? 'inline-block' : 'none';
-        }
+    function hideError() {
+        errorMessage.style.display = 'none';
+    }
 
-        async function fetchVideoInfo() {
-            hideError();
-            setLoading(fetchBtn, true);
-            videoInfo.style.display = 'none';
+    function setLoading(button, isLoading) {
+        const spinner = button.querySelector('.spinner');
+        button.disabled = isLoading;
+        spinner.style.display = isLoading ? 'inline-block' : 'none';
+    }
 
-            try {
-                const response = await fetch('/api/info', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: urlInput.value })
-                });
+    async function fetchVideoInfo() {
+        hideError();
+        setLoading(fetchBtn, true);
+        videoInfo.style.display = 'none';
 
-                if (!response.ok) {
-                    throw new Error('Failed to fetch video info');
-                }
+        try {
+            const response = await fetch('/api/info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: urlInput.value })
+            });
 
-                const data = await response.json();
-                
-                videoThumbnail.src = data.thumbnail;
-                videoTitle.textContent = data.title;
-                videoDuration.textContent = data.duration;
-                videoInfo.style.display = 'block';
-                progressBar.style.display = 'none';
-                progress.style.width = '0%';
-            } catch (error) {
-                showError(error.message);
-            } finally {
-                setLoading(fetchBtn, false);
+            if (!response.ok) {
+                throw new Error('Failed to fetch video info');
             }
+
+            const data = await response.json();
+            
+            // Update format select options
+            formatSelect.innerHTML = '';
+            data.formats.forEach(format => {
+                const option = document.createElement('option');
+                option.value = format.ext;
+                option.textContent = format.label;
+                formatSelect.appendChild(option);
+            });
+
+            // Set initial quality options
+            updateQualityOptions(formatSelect.value);
+            
+            videoThumbnail.src = data.thumbnail;
+            videoTitle.textContent = data.title;
+            videoDuration.textContent = data.duration;
+            videoInfo.style.display = 'block';
+            progressBar.style.display = 'none';
+            progress.style.width = '0%';
+        } catch (error) {
+            showError(error.message);
+        } finally {
+            setLoading(fetchBtn, false);
         }
+    }
 
-        async function downloadVideo() {
-            hideError();
-            setLoading(downloadBtn, true);
-            progressBar.style.display = 'block';
+    async function downloadVideo() {
+        hideError();
+        setLoading(downloadBtn, true);
+        progressBar.style.display = 'block';
 
-            try {
-                const response = await fetch('/api/download', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        url: urlInput.value,
-                        quality: qualitySelect.value
-                    })
-                });
+        try {
+            const response = await fetch('/api/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    url: urlInput.value,
+                    quality: qualitySelect.value,
+                    format: formatSelect.value
+                })
+            });
 
-                if (!response.ok) {
-                    throw new Error('Download failed');
-                }
-
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `${videoTitle.textContent}.mp4`;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                progress.style.width = '100%';
-            } catch (error) {
-                showError(error.message);
-            } finally {
-                setLoading(downloadBtn, false);
+            if (!response.ok) {
+                throw new Error('Download failed');
             }
-        }
 
-        urlInput.addEventListener('input', hideError);
-        fetchBtn.addEventListener('click', fetchVideoInfo);
-        downloadBtn.addEventListener('click', downloadVideo);
-    </script>
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${videoTitle.textContent}.${formatSelect.value}`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            progress.style.width = '100%';
+        } catch (error) {
+            showError(error.message);
+        } finally {
+            setLoading(downloadBtn, false);
+        }
+    }
+
+    urlInput.addEventListener('input', hideError);
+    fetchBtn.addEventListener('click', fetchVideoInfo);
+    downloadBtn.addEventListener('click', downloadVideo);
+    formatSelect.addEventListener('change', () => updateQualityOptions(formatSelect.value));
+</script> 
 </body>
 </html>
