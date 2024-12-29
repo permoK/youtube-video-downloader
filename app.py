@@ -83,9 +83,9 @@ def download_video():
 
         # Simplified format selection focusing on speed
         format_config = {
-            'mp4': 'best[ext=mp4]/best',  # Prefer MP4 but fallback to best
-            'mp3': 'bestaudio[ext=mp3]/bestaudio',  # Best available audio for MP3
-            'm4a': 'bestaudio[ext=m4a]/bestaudio'  # Best available audio for M4A
+            'mp4': 'best[ext=mp4]/best',
+            'mp3': 'bestaudio[ext=mp3]/bestaudio',
+            'm4a': 'bestaudio[ext=m4a]/bestaudio'
         }
 
         # Basic optimized options
@@ -95,8 +95,6 @@ def download_video():
             'restrictfilenames': True,
             'noplaylist': True,
             'quiet': True,
-            'no_warnings': True,
-            'concurrent_fragment_downloads': 10,
         }
 
         # Add minimal audio conversion if needed
@@ -104,33 +102,33 @@ def download_video():
             ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': format_type,
-                'preferredquality': '128',  # Default to 128k for consistent speed
+                'preferredquality': '128',
             }]
 
+        # Download the video/audio
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Single extraction for both info and download
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
             # Handle audio format extensions
             if format_type in ['mp3', 'm4a']:
-                filename = os.path.splitext(filename)[0] + '.' + format_type
+                base = os.path.splitext(filename)[0]
+                filename = f"{base}.{format_type}"
 
-            # Quick check for file existence and cleanup
+            # Simple file check
             if not os.path.exists(filename):
-                base_path = os.path.splitext(filename)[0]
-                matches = glob.glob(f"{base_path}.*")
+                base = os.path.splitext(filename)[0]
+                matches = glob.glob(f"{base}.*")
                 if matches:
                     filename = matches[0]
                 else:
                     raise Exception("Downloaded file not found")
 
-            # Stream the file
+            # Stream file directly
             return send_file(
                 filename,
                 as_attachment=True,
-                download_name=f"{info['title']}.{format_type}",
-                mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
+                download_name=os.path.basename(filename)
             )
 
     except Exception as e:
@@ -144,6 +142,7 @@ def download_video():
                 os.remove(filename)
         except:
             pass
+
 # @app.route('/api/download', methods=['POST'])
 # def download_video():
 #     try:
