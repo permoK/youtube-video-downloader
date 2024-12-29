@@ -76,102 +76,175 @@ def download_video():
     try:
         data = request.get_json()
         url = data.get('url')
-        quality = data.get('quality', 'highest')
         format_type = data.get('format', 'mp4')
         
         if not url:
             return jsonify({'error': 'No URL provided'}), 400
 
-        # Enhanced format selection with audio support
-        format_selection = {
-            'mp4': {
-                'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
-                '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
-                '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
-            },
-            'mp3': {
-                'highest': 'bestaudio[ext=mp3]/bestaudio/best',
-                '128k': 'bestaudio[abr<=128]/best[abr<=128]/best',
-                '96k': 'bestaudio[abr<=96]/best[abr<=96]/best',
-                '64k': 'bestaudio[abr<=64]/best[abr<=64]/best'
-            },
-            'm4a': {
-                'highest': 'bestaudio[ext=m4a]/bestaudio/best',
-                '128k': 'bestaudio[abr<=128][ext=m4a]/best[abr<=128]/best',
-                '96k': 'bestaudio[abr<=96][ext=m4a]/best[abr<=96]/best',
-                '64k': 'bestaudio[abr<=64][ext=m4a]/best[abr<=64]/best'
-            }
+        # Simplified format selection focusing on speed
+        format_config = {
+            'mp4': 'best[ext=mp4]/best',  # Prefer MP4 but fallback to best
+            'mp3': 'bestaudio[ext=mp3]/bestaudio',  # Best available audio for MP3
+            'm4a': 'bestaudio[ext=m4a]/bestaudio'  # Best available audio for M4A
         }
 
-        # Configure optimized download options
+        # Basic optimized options
         ydl_opts = {
-            'format': format_selection[format_type][quality],
+            'format': format_config.get(format_type, 'best'),
             'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
             'restrictfilenames': True,
             'noplaylist': True,
             'quiet': True,
             'no_warnings': True,
-            'postprocessors': [],
-            'concurrent_fragment_downloads': 10,  # Enable parallel fragment downloads
-            'buffersize': 1024 * 1024,  # Increase buffer size to 1MB
+            'concurrent_fragment_downloads': 10,
         }
 
-        # Add format-specific options
-        if format_type == 'mp3':
-            ydl_opts['postprocessors'].append({
+        # Add minimal audio conversion if needed
+        if format_type in ['mp3', 'm4a']:
+            ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': quality.replace('k', ''),
-            })
-            ydl_opts['format'] = 'bestaudio/best'
-        elif format_type == 'm4a':
-            ydl_opts['postprocessors'].append({
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-                'preferredquality': quality.replace('k', ''),
-            })
-            ydl_opts['format'] = 'bestaudio/best'
+                'preferredcodec': format_type,
+                'preferredquality': '128',  # Default to 128k for consistent speed
+            }]
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extract info first to get the filename
-            info = ydl.extract_info(url, download=False)
-            title = clean_filename(info.get('title', 'video'))
-            
-            # Download the video/audio using thread pool
-            info = executor.submit(ydl.extract_info, url, download=True).result()
+            # Single extraction for both info and download
+            info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
-            # Handle different output extensions
+            # Handle audio format extensions
             if format_type in ['mp3', 'm4a']:
-                base_path = os.path.splitext(filename)[0]
-                filename = f"{base_path}.{format_type}"
+                filename = os.path.splitext(filename)[0] + '.' + format_type
 
+            # Quick check for file existence and cleanup
             if not os.path.exists(filename):
                 base_path = os.path.splitext(filename)[0]
-                potential_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(os.path.basename(base_path))]
-                if potential_files:
-                    filename = os.path.join(TEMP_DIR, potential_files[0])
+                matches = glob.glob(f"{base_path}.*")
+                if matches:
+                    filename = matches[0]
                 else:
                     raise Exception("Downloaded file not found")
 
-            # Send the file to the user
-            try:
-                return send_file(
-                    filename,
-                    as_attachment=True,
-                    download_name=f"{title}.{format_type}",
-                    mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
-                )
-            finally:
-                try:
-                    os.remove(filename)
-                except:
-                    pass
+            # Stream the file
+            return send_file(
+                filename,
+                as_attachment=True,
+                download_name=f"{info['title']}.{format_type}",
+                mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
+            )
 
     except Exception as e:
         logging.error(f"Download error: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+    finally:
+        # Cleanup in background
+        try:
+            if 'filename' in locals():
+                os.remove(filename)
+        except:
+            pass
+# @app.route('/api/download', methods=['POST'])
+# def download_video():
+#     try:
+#         data = request.get_json()
+#         url = data.get('url')
+#         quality = data.get('quality', 'highest')
+#         format_type = data.get('format', 'mp4')
+        
+#         if not url:
+#             return jsonify({'error': 'No URL provided'}), 400
+
+#         # Enhanced format selection with audio support
+#         format_selection = {
+#             'mp4': {
+#                 'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+#                 '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
+#                 '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
+#                 '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
+#             },
+#             'mp3': {
+#                 'highest': 'bestaudio[ext=mp3]/bestaudio/best',
+#                 '128k': 'bestaudio[abr<=128]/best[abr<=128]/best',
+#                 '96k': 'bestaudio[abr<=96]/best[abr<=96]/best',
+#                 '64k': 'bestaudio[abr<=64]/best[abr<=64]/best'
+#             },
+#             'm4a': {
+#                 'highest': 'bestaudio[ext=m4a]/bestaudio/best',
+#                 '128k': 'bestaudio[abr<=128][ext=m4a]/best[abr<=128]/best',
+#                 '96k': 'bestaudio[abr<=96][ext=m4a]/best[abr<=96]/best',
+#                 '64k': 'bestaudio[abr<=64][ext=m4a]/best[abr<=64]/best'
+#             }
+#         }
+
+#         # Configure optimized download options
+#         ydl_opts = {
+#             'format': format_selection[format_type][quality],
+#             'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
+#             'restrictfilenames': True,
+#             'noplaylist': True,
+#             'quiet': True,
+#             'no_warnings': True,
+#             'postprocessors': [],
+#             'concurrent_fragment_downloads': 10,  # Enable parallel fragment downloads
+#             'buffersize': 1024 * 1024,  # Increase buffer size to 1MB
+#         }
+
+#         # Add format-specific options
+#         if format_type == 'mp3':
+#             ydl_opts['postprocessors'].append({
+#                 'key': 'FFmpegExtractAudio',
+#                 'preferredcodec': 'mp3',
+#                 'preferredquality': quality.replace('k', ''),
+#             })
+#             ydl_opts['format'] = 'bestaudio/best'
+#         elif format_type == 'm4a':
+#             ydl_opts['postprocessors'].append({
+#                 'key': 'FFmpegExtractAudio',
+#                 'preferredcodec': 'm4a',
+#                 'preferredquality': quality.replace('k', ''),
+#             })
+#             ydl_opts['format'] = 'bestaudio/best'
+
+#         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+#             # Extract info first to get the filename
+#             info = ydl.extract_info(url, download=False)
+#             title = clean_filename(info.get('title', 'video'))
+            
+#             # Download the video/audio using thread pool
+#             info = executor.submit(ydl.extract_info, url, download=True).result()
+#             filename = ydl.prepare_filename(info)
+            
+#             # Handle different output extensions
+#             if format_type in ['mp3', 'm4a']:
+#                 base_path = os.path.splitext(filename)[0]
+#                 filename = f"{base_path}.{format_type}"
+
+#             if not os.path.exists(filename):
+#                 base_path = os.path.splitext(filename)[0]
+#                 potential_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(os.path.basename(base_path))]
+#                 if potential_files:
+#                     filename = os.path.join(TEMP_DIR, potential_files[0])
+#                 else:
+#                     raise Exception("Downloaded file not found")
+
+#             # Send the file to the user
+#             try:
+#                 return send_file(
+#                     filename,
+#                     as_attachment=True,
+#                     download_name=f"{title}.{format_type}",
+#                     mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
+#                 )
+#             finally:
+#                 try:
+#                     os.remove(filename)
+#                 except:
+#                     pass
+
+#     except Exception as e:
+#         logging.error(f"Download error: {str(e)}")
+#         return jsonify({'error': str(e)}), 500
 
 def cleanup_old_files():
     try:
