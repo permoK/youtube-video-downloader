@@ -1,65 +1,349 @@
 <!DOCTYPE html>
-<html>
-	<head>
-		<title>YouTube Downloader</title>
-		<style>
-body {
-	font-family: Arial, sans-serif;
-	max-width: 800px;
-	margin: 0 auto;
-	padding: 20px;
-	text-align: center;
-}
-			.container {
-				margin-top: 50px;
-			}
-			input[type="text"] {
-				width: 80%;
-				padding: 10px;
-				margin: 10px 0;
-			}
-			input[type="submit"] {
-				padding: 10px 20px;
-				background-color: #ff0000;
-				color: white;
-				border: none;
-				border-radius: 5px;
-				cursor: pointer;
-			}
-			input[type="submit"]:hover {
-				background-color: #cc0000;
-			}
-			.error {
-				color: red;
-				margin-top: 10px;
-			}
-			.loading {
-				display: none;
-				margin-top: 20px;
-			}
-		</style>
-		<script>
-			function showLoading() {
-				document.getElementById('loading').style.display = 'block';
-				document.getElementById('submitBtn').disabled = true;
-			}
-		</script>
-	</head>
-	<body>
-		<div class="container">
-			<h1>YouTube Video Downloader</h1>
-			<form method="POST" onsubmit="showLoading()">
-				<input type="text" name="url" placeholder="Paste YouTube URL here" required>
-				<br>
-				<input type="submit" id="submitBtn" value="Download">
-			</form>
-			{% if message %}
-			<p class="error">{{ message }}</p>
-			{% endif %}
-			<div id="loading" class="loading">
-				<p>Downloading... Please wait...</p>
-			</div>
-		</div>
-	</body>
-</html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Video Downloader</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #ff0000;
+            --primary-hover: #cc0000;
+            --bg-color: #f5f5f5;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #e0e0e0;
+        }
 
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 40px auto;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            padding: 24px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .header i {
+            color: var(--primary-color);
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: #666;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .error {
+            background-color: #fee2e2;
+            border-left: 4px solid #ef4444;
+            padding: 12px;
+            margin-bottom: 24px;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .video-info {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            display: none;
+        }
+
+        .video-info-header {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .thumbnail {
+            width: 200px;
+            border-radius: 8px;
+        }
+
+        .video-details {
+            flex: 1;
+        }
+
+        .video-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .video-duration {
+            color: #666;
+            margin-bottom: 16px;
+        }
+
+        .quality-select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-bottom: 16px;
+        }
+
+        .progress-bar {
+            height: 4px;
+            background-color: #e5e7eb;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 16px;
+            display: none;
+        }
+
+        .progress {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .spinner {
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 640px) {
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .video-info-header {
+                flex-direction: column;
+            }
+
+            .thumbnail {
+                width: 100%;
+                max-width: 300px;
+                margin: 0 auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <i class="fab fa-youtube"></i>
+            <h1>YouTube Video Downloader</h1>
+            <p>Enter a YouTube URL to download the video</p>
+        </div>
+
+        <div class="input-group">
+            <input type="text" id="url-input" placeholder="Paste YouTube URL here">
+            <button id="fetch-btn">
+                <i class="fas fa-search"></i>
+                Get Info
+                <i class="fas fa-spinner fa-spin spinner"></i>
+            </button>
+        </div>
+
+        <div class="error" id="error-message">
+            <i class="fas fa-exclamation-circle"></i>
+            <span></span>
+        </div>
+
+        <div class="video-info" id="video-info">
+            <div class="video-info-header">
+                <img class="thumbnail" id="video-thumbnail" src="" alt="Video thumbnail">
+                <div class="video-details">
+                    <div class="video-title" id="video-title"></div>
+                    <div class="video-duration" id="video-duration"></div>
+                    
+                    <select class="quality-select" id="quality-select">
+                        <option value="highest">Highest Quality</option>
+                        <option value="720p">720p</option>
+                        <option value="480p">480p</option>
+                        <option value="360p">360p</option>
+                    </select>
+
+                    <button id="download-btn">
+                        <i class="fas fa-download"></i>
+                        Download Video
+                        <i class="fas fa-spinner fa-spin spinner"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress" id="progress"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('url-input');
+        const fetchBtn = document.getElementById('fetch-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const errorMessage = document.getElementById('error-message');
+        const videoInfo = document.getElementById('video-info');
+        const videoThumbnail = document.getElementById('video-thumbnail');
+        const videoTitle = document.getElementById('video-title');
+        const videoDuration = document.getElementById('video-duration');
+        const qualitySelect = document.getElementById('quality-select');
+        const progressBar = document.getElementById('progress-bar');
+        const progress = document.getElementById('progress');
+
+        function showError(message) {
+            errorMessage.style.display = 'flex';
+            errorMessage.querySelector('span').textContent = message;
+        }
+
+        function hideError() {
+            errorMessage.style.display = 'none';
+        }
+
+        function setLoading(button, isLoading) {
+            const spinner = button.querySelector('.spinner');
+            button.disabled = isLoading;
+            spinner.style.display = isLoading ? 'inline-block' : 'none';
+        }
+
+        async function fetchVideoInfo() {
+            hideError();
+            setLoading(fetchBtn, true);
+            videoInfo.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: urlInput.value })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch video info');
+                }
+
+                const data = await response.json();
+                
+                videoThumbnail.src = data.thumbnail;
+                videoTitle.textContent = data.title;
+                videoDuration.textContent = data.duration;
+                videoInfo.style.display = 'block';
+                progressBar.style.display = 'none';
+                progress.style.width = '0%';
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                setLoading(fetchBtn, false);
+            }
+        }
+
+        async function downloadVideo() {
+            hideError();
+            setLoading(downloadBtn, true);
+            progressBar.style.display = 'block';
+
+            try {
+                const response = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: urlInput.value,
+                        quality: qualitySelect.value
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Download failed');
+                }
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${videoTitle.textContent}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                progress.style.width = '100%';
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                setLoading(downloadBtn, false);
+            }
+        }
+
+        urlInput.addEventListener('input', hideError);
+        fetchBtn.addEventListener('click', fetchVideoInfo);
+        downloadBtn.addEventListener('click', downloadVideo);
+    </script>
+</body>
+</html>
