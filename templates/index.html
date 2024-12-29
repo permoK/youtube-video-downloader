@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<title>YouTube Downloader</title>
+		<style>
+body {
+	font-family: Arial, sans-serif;
+	max-width: 800px;
+	margin: 0 auto;
+	padding: 20px;
+	text-align: center;
+}
+			.container {
+				margin-top: 50px;
+			}
+			input[type="text"] {
+				width: 80%;
+				padding: 10px;
+				margin: 10px 0;
+			}
+			input[type="submit"] {
+				padding: 10px 20px;
+				background-color: #ff0000;
+				color: white;
+				border: none;
+				border-radius: 5px;
+				cursor: pointer;
+			}
+			input[type="submit"]:hover {
+				background-color: #cc0000;
+			}
+			.error {
+				color: red;
+				margin-top: 10px;
+			}
+			.loading {
+				display: none;
+				margin-top: 20px;
+			}
+		</style>
+		<script>
+			function showLoading() {
+				document.getElementById('loading').style.display = 'block';
+				document.getElementById('submitBtn').disabled = true;
+			}
+		</script>
+	</head>
+	<body>
+		<div class="container">
+			<h1>YouTube Video Downloader</h1>
+			<form method="POST" onsubmit="showLoading()">
+				<input type="text" name="url" placeholder="Paste YouTube URL here" required>
+				<br>
+				<input type="submit" id="submitBtn" value="Download">
+			</form>
+			{% if message %}
+			<p class="error">{{ message }}</p>
+			{% endif %}
+			<div id="loading" class="loading">
+				<p>Downloading... Please wait...</p>
+			</div>
+		</div>
+	</body>
+</html>
+
