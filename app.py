@@ -149,6 +149,7 @@ def cleanup_old_files():
             if os.path.isfile(filepath) and os.path.getctime(filepath) < time.time() - 3600:
                 try:
                     os.remove(filepath)
+                    print("removed file:" + filename)
                 except:
                     pass
     except Exception as e:
