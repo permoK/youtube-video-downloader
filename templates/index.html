@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube Video Downloader</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         :root {
             --primary-color: #ff0000;
@@ -248,157 +249,152 @@
     </div>
 
 <script>
-    const urlInput = document.getElementById('url-input');
-    const fetchBtn = document.getElementById('fetch-btn');
-    const downloadBtn = document.getElementById('download-btn');
-    const errorMessage = document.getElementById('error-message');
-    const videoInfo = document.getElementById('video-info');
-    const videoThumbnail = document.getElementById('video-thumbnail');
-    const videoTitle = document.getElementById('video-title');
-    const videoDuration = document.getElementById('video-duration');
-    const qualitySelect = document.getElementById('quality-select');
-    const formatSelect = document.createElement('select');  // New format select element
-    const progressBar = document.getElementById('progress-bar');
-    const progress = document.getElementById('progress');
+const urlInput = document.getElementById('url-input');
+const fetchBtn = document.getElementById('fetch-btn');
+const downloadBtn = document.getElementById('download-btn');
+const errorMessage = document.getElementById('error-message');
+const videoInfo = document.getElementById('video-info');
+const videoThumbnail = document.getElementById('video-thumbnail');
+const videoTitle = document.getElementById('video-title');
+const videoDuration = document.getElementById('video-duration');
+const qualitySelect = document.getElementById('quality-select');
+const formatSelect = document.createElement('select');
+const progressBar = document.getElementById('progress-bar');
+const progress = document.getElementById('progress');
+const socket = io();
 
-    // Add format select to the UI
-    formatSelect.className = 'quality-select';
-    formatSelect.id = 'format-select';
-    qualitySelect.parentNode.insertBefore(formatSelect, qualitySelect);
+formatSelect.className = 'quality-select';
+formatSelect.id = 'format-select';
+qualitySelect.parentNode.insertBefore(formatSelect, qualitySelect);
 
-    // Update quality options based on format
-    function updateQualityOptions(format) {
-        qualitySelect.innerHTML = '';
+function updateQualityOptions(format) {
+    qualitySelect.innerHTML = '';
+    
+    if (format === 'mp4') {
+        const videoQualities = [
+            { value: 'highest', label: 'Highest Quality' },
+            { value: '720p', label: '720p' },
+            { value: '480p', label: '480p' },
+            { value: '360p', label: '360p' }
+        ];
         
-        if (format === 'mp4') {
-            const videoQualities = [
-                { value: 'highest', label: 'Highest Quality' },
-                { value: '720p', label: '720p' },
-                { value: '480p', label: '480p' },
-                { value: '360p', label: '360p' }
-            ];
-            
-            videoQualities.forEach(quality => {
-                const option = document.createElement('option');
-                option.value = quality.value;
-                option.textContent = quality.label;
-                qualitySelect.appendChild(option);
-            });
-        } else {
-            const audioQualities = [
-                { value: 'highest', label: 'Highest Quality' },
-                { value: '128k', label: '128 kbps' },
-                { value: '96k', label: '96 kbps' },
-                { value: '64k', label: '64 kbps' }
-            ];
-            
-            audioQualities.forEach(quality => {
-                const option = document.createElement('option');
-                option.value = quality.value;
-                option.textContent = quality.label;
-                qualitySelect.appendChild(option);
-            });
+        videoQualities.forEach(quality => {
+            const option = document.createElement('option');
+            option.value = quality.value;
+            option.textContent = quality.label;
+            qualitySelect.appendChild(option);
+        });
+    } else {
+        const audioQualities = [
+            { value: 'highest', label: 'Highest Quality' },
+            { value: '128k', label: '128 kbps' },
+            { value: '96k', label: '96 kbps' },
+            { value: '64k', label: '64 kbps' }
+        ];
+        
+        audioQualities.forEach(quality => {
+            const option = document.createElement('option');
+            option.value = quality.value;
+            option.textContent = quality.label;
+            qualitySelect.appendChild(option);
+        });
+    }
+}
+
+function showError(message) {
+    errorMessage.style.display = 'flex';
+    errorMessage.querySelector('span').textContent = message;
+}
+
+function hideError() {
+    errorMessage.style.display = 'none';
+}
+
+function setLoading(button, isLoading) {
+    const spinner = button.querySelector('.spinner');
+    button.disabled = isLoading;
+    spinner.style.display = isLoading ? 'inline-block' : 'none';
+}
+
+async function fetchVideoInfo() {
+    hideError();
+    setLoading(fetchBtn, true);
+    videoInfo.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: urlInput.value })
+        });
+
+        if (!response.ok) {
+            throw new Error('Failed to fetch video info');
         }
+
+        const data = await response.json();
+        
+        formatSelect.innerHTML = '';
+        data.formats.forEach(format => {
+            const option = document.createElement('option');
+            option.value = format.ext;
+            option.textContent = format.label;
+            formatSelect.appendChild(option);
+        });
+
+        updateQualityOptions(formatSelect.value);
+        
+        videoThumbnail.src = data.thumbnail;
+        videoTitle.textContent = data.title;
+        videoDuration.textContent = data.duration;
+        videoInfo.style.display = 'block';
+        progressBar.style.display = 'none';
+        progress.style.width = '0%';
+    } catch (error) {
+        showError(error.message);
+    } finally {
+        setLoading(fetchBtn, false);
     }
+}
 
-    function showError(message) {
-        errorMessage.style.display = 'flex';
-        errorMessage.querySelector('span').textContent = message;
-    }
+async function downloadVideo() {
+    hideError();
+    setLoading(downloadBtn, true);
+    progressBar.style.display = 'block';
+    progress.style.width = '0%';
 
-    function hideError() {
-        errorMessage.style.display = 'none';
-    }
+    socket.emit('start_download', {
+        url: urlInput.value,
+        quality: qualitySelect.value,
+        format: formatSelect.value
+    });
+}
 
-    function setLoading(button, isLoading) {
-        const spinner = button.querySelector('.spinner');
-        button.disabled = isLoading;
-        spinner.style.display = isLoading ? 'inline-block' : 'none';
-    }
+socket.on('download_progress', (data) => {
+    progress.style.width = `${data.progress}%`;
+});
 
-    async function fetchVideoInfo() {
-        hideError();
-        setLoading(fetchBtn, true);
-        videoInfo.style.display = 'none';
+socket.on('download_complete', (data) => {
+    setLoading(downloadBtn, false);
+    progress.style.width = '100%';
+    
+    const a = document.createElement('a');
+    a.href = `/downloads/${data.filename}`;
+    a.download = data.filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+});
 
-        try {
-            const response = await fetch('/api/info', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: urlInput.value })
-            });
+socket.on('download_error', (data) => {
+    setLoading(downloadBtn, false);
+    showError(data.error);
+});
 
-            if (!response.ok) {
-                throw new Error('Failed to fetch video info');
-            }
-
-            const data = await response.json();
-            
-            // Update format select options
-            formatSelect.innerHTML = '';
-            data.formats.forEach(format => {
-                const option = document.createElement('option');
-                option.value = format.ext;
-                option.textContent = format.label;
-                formatSelect.appendChild(option);
-            });
-
-            // Set initial quality options
-            updateQualityOptions(formatSelect.value);
-            
-            videoThumbnail.src = data.thumbnail;
-            videoTitle.textContent = data.title;
-            videoDuration.textContent = data.duration;
-            videoInfo.style.display = 'block';
-            progressBar.style.display = 'none';
-            progress.style.width = '0%';
-        } catch (error) {
-            showError(error.message);
-        } finally {
-            setLoading(fetchBtn, false);
-        }
-    }
-
-    async function downloadVideo() {
-        hideError();
-        setLoading(downloadBtn, true);
-        progressBar.style.display = 'block';
-
-        try {
-            const response = await fetch('/api/download', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    url: urlInput.value,
-                    quality: qualitySelect.value,
-                    format: formatSelect.value
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Download failed');
-            }
-
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${videoTitle.textContent}.${formatSelect.value}`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            progress.style.width = '100%';
-        } catch (error) {
-            showError(error.message);
-        } finally {
-            setLoading(downloadBtn, false);
-        }
-    }
-
-    urlInput.addEventListener('input', hideError);
-    fetchBtn.addEventListener('click', fetchVideoInfo);
-    downloadBtn.addEventListener('click', downloadVideo);
-    formatSelect.addEventListener('change', () => updateQualityOptions(formatSelect.value));
+urlInput.addEventListener('input', hideError);
+fetchBtn.addEventListener('click', fetchVideoInfo);
+downloadBtn.addEventListener('click', downloadVideo);
+formatSelect.addEventListener('change', () => updateQualityOptions(formatSelect.value));
 </script> 
 </body>
 </html>

@@ -1,19 +1,41 @@
-from flask import Flask, render_template, request, jsonify, send_file, render_template_string
+from flask import Flask, render_template, request, jsonify, send_file, render_template_string, send_from_directory
+from flask_socketio import SocketIO, emit
 import yt_dlp
 import os
 import tempfile
 import logging
+import time
 from datetime import timedelta
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
+socketio = SocketIO(app)
 logging.basicConfig(level=logging.INFO)
 
-# Create a temporary directory for downloads
-TEMP_DIR = tempfile.mkdtemp()
-# Create a thread pool for concurrent downloads
+TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'downloads')
+if not os.path.exists(TEMP_DIR):
+    os.makedirs(TEMP_DIR)
+
 executor = ThreadPoolExecutor(max_workers=4)
+
+class ProgressHook:
+    def __init__(self, socket_id):
+        self.socket_id = socket_id
+        self.downloaded = 0
+        self.total = 0
+
+    def __call__(self, d):
+        if d['status'] == 'downloading':
+            self.downloaded = d.get('downloaded_bytes', 0)
+            self.total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+            
+            if self.total > 0:
+                progress = (self.downloaded / self.total) * 100
+                socketio.emit('download_progress', {
+                    'progress': progress,
+                    'socket_id': self.socket_id
+                })
 
 def format_duration(seconds):
     if not seconds:
@@ -48,8 +70,6 @@ def get_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False)
-                
-                # Enhanced video information
                 video_info = {
                     'title': info.get('title', 'Unknown Title'),
                     'duration': format_duration(info.get('duration')),
@@ -60,44 +80,44 @@ def get_info():
                         {'ext': 'm4a', 'label': 'Audio (M4A)'}
                     ]
                 }
-                
                 return jsonify(video_info)
-            
             except Exception as e:
                 logging.error(f"Error extracting video info: {str(e)}")
                 return jsonify({'error': 'Invalid YouTube URL or video not found'}), 400
-
     except Exception as e:
         logging.error(f"Server error: {str(e)}")
         return jsonify({'error': 'Server error occurred'}), 500
 
-@app.route('/api/download', methods=['POST'])
-def download_video():
+@app.route('/downloads/<path:filename>')
+def download_file(filename):
+    return send_from_directory(TEMP_DIR, filename, as_attachment=True)
+
+@socketio.on('start_download')
+def handle_download(data):
     try:
-        data = request.get_json()
         url = data.get('url')
         format_type = data.get('format', 'mp4')
+        socket_id = request.sid
         
         if not url:
-            return jsonify({'error': 'No URL provided'}), 400
+            emit('download_error', {'error': 'No URL provided'})
+            return
 
-        # Simplified format selection focusing on speed
         format_config = {
             'mp4': 'best[ext=mp4]/best',
             'mp3': 'bestaudio[ext=mp3]/bestaudio',
             'm4a': 'bestaudio[ext=m4a]/bestaudio'
         }
 
-        # Basic optimized options
         ydl_opts = {
             'format': format_config.get(format_type, 'best'),
             'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
             'restrictfilenames': True,
             'noplaylist': True,
             'quiet': True,
+            'progress_hooks': [ProgressHook(socket_id)]
         }
 
-        # Add minimal audio conversion if needed
         if format_type in ['mp3', 'm4a']:
             ydl_opts['postprocessors'] = [{
                 'key': 'FFmpegExtractAudio',
@@ -105,161 +125,38 @@ def download_video():
                 'preferredquality': '128',
             }]
 
-        # Download the video/audio
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
             
-            # Handle audio format extensions
             if format_type in ['mp3', 'm4a']:
                 base = os.path.splitext(filename)[0]
                 filename = f"{base}.{format_type}"
 
-            # Simple file check
-            if not os.path.exists(filename):
-                base = os.path.splitext(filename)[0]
-                matches = glob.glob(f"{base}.*")
-                if matches:
-                    filename = matches[0]
-                else:
-                    raise Exception("Downloaded file not found")
-
-            # Stream file directly
-            return send_file(
-                filename,
-                as_attachment=True,
-                download_name=os.path.basename(filename)
-            )
+            if os.path.exists(filename):
+                emit('download_complete', {'filename': os.path.basename(filename)})
+            else:
+                emit('download_error', {'error': 'File not found after download'})
 
     except Exception as e:
         logging.error(f"Download error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-    finally:
-        # Cleanup in background
-        try:
-            if 'filename' in locals():
-                os.remove(filename)
-        except:
-            pass
-
-# @app.route('/api/download', methods=['POST'])
-# def download_video():
-#     try:
-#         data = request.get_json()
-#         url = data.get('url')
-#         quality = data.get('quality', 'highest')
-#         format_type = data.get('format', 'mp4')
-        
-#         if not url:
-#             return jsonify({'error': 'No URL provided'}), 400
-
-#         # Enhanced format selection with audio support
-#         format_selection = {
-#             'mp4': {
-#                 'highest': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-#                 '720p': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best',
-#                 '480p': 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best',
-#                 '360p': 'bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/best[height<=360][ext=mp4]/best'
-#             },
-#             'mp3': {
-#                 'highest': 'bestaudio[ext=mp3]/bestaudio/best',
-#                 '128k': 'bestaudio[abr<=128]/best[abr<=128]/best',
-#                 '96k': 'bestaudio[abr<=96]/best[abr<=96]/best',
-#                 '64k': 'bestaudio[abr<=64]/best[abr<=64]/best'
-#             },
-#             'm4a': {
-#                 'highest': 'bestaudio[ext=m4a]/bestaudio/best',
-#                 '128k': 'bestaudio[abr<=128][ext=m4a]/best[abr<=128]/best',
-#                 '96k': 'bestaudio[abr<=96][ext=m4a]/best[abr<=96]/best',
-#                 '64k': 'bestaudio[abr<=64][ext=m4a]/best[abr<=64]/best'
-#             }
-#         }
-
-#         # Configure optimized download options
-#         ydl_opts = {
-#             'format': format_selection[format_type][quality],
-#             'outtmpl': os.path.join(TEMP_DIR, '%(title)s.%(ext)s'),
-#             'restrictfilenames': True,
-#             'noplaylist': True,
-#             'quiet': True,
-#             'no_warnings': True,
-#             'postprocessors': [],
-#             'concurrent_fragment_downloads': 10,  # Enable parallel fragment downloads
-#             'buffersize': 1024 * 1024,  # Increase buffer size to 1MB
-#         }
-
-#         # Add format-specific options
-#         if format_type == 'mp3':
-#             ydl_opts['postprocessors'].append({
-#                 'key': 'FFmpegExtractAudio',
-#                 'preferredcodec': 'mp3',
-#                 'preferredquality': quality.replace('k', ''),
-#             })
-#             ydl_opts['format'] = 'bestaudio/best'
-#         elif format_type == 'm4a':
-#             ydl_opts['postprocessors'].append({
-#                 'key': 'FFmpegExtractAudio',
-#                 'preferredcodec': 'm4a',
-#                 'preferredquality': quality.replace('k', ''),
-#             })
-#             ydl_opts['format'] = 'bestaudio/best'
-
-#         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-#             # Extract info first to get the filename
-#             info = ydl.extract_info(url, download=False)
-#             title = clean_filename(info.get('title', 'video'))
-            
-#             # Download the video/audio using thread pool
-#             info = executor.submit(ydl.extract_info, url, download=True).result()
-#             filename = ydl.prepare_filename(info)
-            
-#             # Handle different output extensions
-#             if format_type in ['mp3', 'm4a']:
-#                 base_path = os.path.splitext(filename)[0]
-#                 filename = f"{base_path}.{format_type}"
-
-#             if not os.path.exists(filename):
-#                 base_path = os.path.splitext(filename)[0]
-#                 potential_files = [f for f in os.listdir(TEMP_DIR) if f.startswith(os.path.basename(base_path))]
-#                 if potential_files:
-#                     filename = os.path.join(TEMP_DIR, potential_files[0])
-#                 else:
-#                     raise Exception("Downloaded file not found")
-
-#             # Send the file to the user
-#             try:
-#                 return send_file(
-#                     filename,
-#                     as_attachment=True,
-#                     download_name=f"{title}.{format_type}",
-#                     mimetype=f'{"video" if format_type == "mp4" else "audio"}/{format_type}'
-#                 )
-#             finally:
-#                 try:
-#                     os.remove(filename)
-#                 except:
-#                     pass
-
-#     except Exception as e:
-#         logging.error(f"Download error: {str(e)}")
-#         return jsonify({'error': str(e)}), 500
+        emit('download_error', {'error': str(e)})
 
 def cleanup_old_files():
     try:
         for filename in os.listdir(TEMP_DIR):
             filepath = os.path.join(TEMP_DIR, filename)
-            try:
-                if os.path.isfile(filepath):
+            if os.path.isfile(filepath) and os.path.getctime(filepath) < time.time() - 3600:
+                try:
                     os.remove(filepath)
-            except:
-                pass
-    except:
-        pass
+                except:
+                    pass
+    except Exception as e:
+        logging.error(f"Cleanup error: {str(e)}")
 
 @app.before_request
 def before_request():
     cleanup_old_files()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5200, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5200, debug=True)
